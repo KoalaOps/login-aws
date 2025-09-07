@@ -156,26 +156,6 @@ jobs:
     role_duration: 7200  # 2 hours
 ```
 
-## Migration from aws-oidc-action
-
-This action replaces `KoalaOps/aws-oidc`. To migrate:
-
-```yaml
-# Old
-- uses: KoalaOps/aws-oidc@v1
-  with:
-    aws_region: us-east-1
-    role_to_assume: ${{ secrets.AWS_ROLE }}
-    ecr_login: true
-
-# New (just change the action name and ecr_login parameter)
-- uses: KoalaOps/login-aws@v1
-  with:
-    aws_region: us-east-1
-    role_to_assume: ${{ secrets.AWS_ROLE }}
-    enable_ecr_login: true
-```
-
 ## Building Blocks Used
 
 This action internally uses:
