@@ -1,0 +1,144 @@
+name: 'Login to AWS'
+description: 'Authenticate to AWS using OIDC with optional ECR login and EKS setup'
+author: 'KoalaOps'
+
+branding:
+  icon: 'cloud'
+  color: 'orange'
+
+inputs:
+  aws_region:
+    description: 'AWS region'
+    required: true
+  
+  role_to_assume:
+    description: 'ARN of the IAM role to assume (required for OIDC)'
+    required: true
+  
+  role_session_name:
+    description: 'Name for the assumed role session'
+    required: false
+    default: 'github-actions-${{ github.run_id }}'
+  
+  role_duration:
+    description: 'Duration of the role session in seconds'
+    required: false
+    default: '3600'
+  
+  enable_ecr_login:
+    description: 'Enable Docker login to Amazon ECR'
+    required: false
+    default: 'false'
+  
+  eks_cluster_name:
+    description: 'Name of the EKS cluster to configure kubectl for'
+    required: false
+  
+  ecr_registries:
+    description: 'Comma-separated list of ECR registry IDs for cross-account access'
+    required: false
+  
+  ecr_repositories:
+    description: 'Comma-separated list of ECR repositories to ensure exist (e.g., "backend,frontend")'
+    required: false
+    default: ''
+
+outputs:
+  aws_account_id:
+    description: 'AWS Account ID'
+    value: ${{ steps.aws.outputs.aws-account-id }}
+  
+  ecr_registry:
+    description: 'ECR registry URL'
+    value: ${{ steps.login-ecr.outputs.registry }}
+  
+  eks_context:
+    description: 'Kubernetes context name if EKS was configured'
+    value: ${{ steps.eks.outputs.context }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Configure AWS credentials
+      id: aws
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.role_to_assume }}
+        role-session-name: ${{ inputs.role_session_name }}
+        role-duration-seconds: ${{ inputs.role_duration }}
+        aws-region: ${{ inputs.aws_region }}
+        mask-aws-account-id: false
+
+    - name: Verify AWS connection
+      shell: bash
+      run: |
+        echo "::group::AWS Authentication Status"
+        aws sts get-caller-identity --output table
+        echo "✅ AWS authentication successful"
+        echo "::endgroup::"
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      if: inputs.enable_ecr_login == 'true'
+      uses: aws-actions/amazon-ecr-login@v2
+      with:
+        registries: ${{ inputs.ecr_registries }}
+        mask-password: true
+
+    - name: Log ECR status
+      if: inputs.enable_ecr_login == 'true'
+      shell: bash
+      run: |
+        echo "::notice::📦 ECR login successful for registry: ${{ steps.login-ecr.outputs.registry }}"
+    
+    - name: Ensure ECR repositories exist
+      if: inputs.enable_ecr_login == 'true' && inputs.ecr_repositories != ''
+      uses: KoalaOps/ensure-ecr-repository@v1
+      with:
+        repository-names: ${{ inputs.ecr_repositories }}
+
+    - name: Setup kubectl for EKS
+      id: eks
+      if: inputs.eks_cluster_name != ''
+      shell: bash
+      run: |
+        echo "::group::EKS Configuration"
+        
+        # Update kubeconfig
+        aws eks update-kubeconfig \
+          --region ${{ inputs.aws_region }} \
+          --name ${{ inputs.eks_cluster_name }} \
+          --alias ${{ inputs.eks_cluster_name }}
+        
+        # Get the context name
+        CONTEXT=$(kubectl config current-context)
+        echo "context=$CONTEXT" >> $GITHUB_OUTPUT
+        
+        # Verify connection
+        echo "Testing EKS connection..."
+        kubectl get nodes --show-labels=false --no-headers | head -5 || true
+        
+        echo "✅ EKS cluster configured: ${{ inputs.eks_cluster_name }}"
+        echo "📍 Context: $CONTEXT"
+        echo "::endgroup::"
+
+    - name: Summary
+      shell: bash
+      run: |
+        echo "### AWS Login Summary 🔐" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Service | Status | Details |" >> $GITHUB_STEP_SUMMARY
+        echo "|---------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+        echo "| **AWS** | ✅ Authenticated | Account: ${{ steps.aws.outputs.aws-account-id }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Region** | 📍 ${{ inputs.aws_region }} | - |" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ inputs.enable_ecr_login }}" == "true" ]]; then
+          echo "| **ECR** | ✅ Logged in | Registry: ${{ steps.login-ecr.outputs.registry }} |" >> $GITHUB_STEP_SUMMARY
+          if [[ -n "${{ inputs.ecr_repositories }}" ]]; then
+            echo "| **ECR Repos** | ✅ Ensured | Repositories: ${{ inputs.ecr_repositories }} |" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        if [[ -n "${{ inputs.eks_cluster_name }}" ]]; then
+          echo "| **EKS** | ✅ Configured | Cluster: ${{ inputs.eks_cluster_name }} |" >> $GITHUB_STEP_SUMMARY
+        fi
