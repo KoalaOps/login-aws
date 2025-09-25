@@ -1,10 +1,11 @@
 # login-aws
 
-GitHub Action for authenticating to AWS using OIDC (OpenID Connect) with optional ECR login and EKS configuration.
+GitHub Action for authenticating to AWS using OIDC (OpenID Connect) or access keys, with optional ECR login and EKS configuration.
 
 ## Features
 
-- 🔐 **Secure OIDC Authentication** - No long-lived credentials needed
+- 🔐 **Secure OIDC Authentication** - Recommended passwordless auth
+- 🔑 **Access Key Support** - Fallback for environments without OIDC
 - 🐳 **ECR Integration** - Optional Docker registry login
 - ☸️ **EKS Support** - Configure kubectl for your clusters
 - 🔄 **Cross-Account Access** - Support for multiple ECR registries
@@ -65,18 +66,33 @@ jobs:
 }
 ```
 
+## Authentication Methods
+
+### OIDC (Recommended)
+Use `role_to_assume` for passwordless authentication via GitHub's OIDC token.
+
+### Access Keys (Alternative)
+Use `aws_access_key_id` and `aws_secret_access_key` for traditional authentication. Only use when OIDC is not available.
+
 ## Inputs
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
 | `aws_region` | AWS region to use | ✅ | - |
-| `role_to_assume` | ARN of IAM role to assume via OIDC | ✅ | - |
+| **OIDC Authentication** |
+| `role_to_assume` | ARN of IAM role to assume via OIDC | ⚠️* | - |
 | `role_session_name` | Name for the assumed role session | ❌ | `github-actions-{run-id}` |
 | `role_duration` | Session duration in seconds | ❌ | `3600` |
+| **Access Key Authentication** |
+| `aws_access_key_id` | AWS Access Key ID | ⚠️* | - |
+| `aws_secret_access_key` | AWS Secret Access Key | ⚠️* | - |
+| **Services** |
 | `enable_ecr_login` | Enable Docker login to ECR | ❌ | `false` |
 | `eks_cluster_name` | EKS cluster to configure kubectl for | ❌ | - |
-| `ecr_registries` | Comma-separated ECR registry IDs for cross-account | ❌ | - |
-| `ecr_repositories` | ECR repositories to ensure exist (uses ensure-ecr-repository action) | ❌ | - |
+| `ecr_registries` | ECR registry IDs for cross-account access (comma-separated) | ❌ | - |
+| `ecr_repositories` | ECR repositories to create if missing (comma-separated) | ❌ | - |
+
+*Either use OIDC (`role_to_assume`) or access keys (`aws_access_key_id` + `aws_secret_access_key`)
 
 ## Outputs
 
@@ -86,7 +102,39 @@ jobs:
 | `ecr_registry` | ECR registry URL (if ECR login enabled) |
 | `eks_context` | Kubernetes context name (if EKS configured) |
 
+## ECR Parameters Explained
+
+### When to use `ecr_registries`
+Use when you need to access ECR registries in **other AWS accounts**:
+- Pulling base images from a shared account
+- Pushing to a central registry account
+- Multi-account deployment pipelines
+
+Example: `ecr_registries: "123456789012,987654321098"`
+
+### When to use `ecr_repositories`
+Use when you want to **ensure repositories exist** in your account:
+- Auto-creating repos for new services
+- CI/CD pipelines that may run before infrastructure setup
+- Avoiding "repository not found" errors
+
+Example: `ecr_repositories: "backend,frontend,worker"`
+
+**Note:** These can be used together - `ecr_registries` for cross-account access, `ecr_repositories` for repo creation.
+
 ## Examples
+
+### With Access Keys (Non-OIDC)
+
+```yaml
+- name: Login to AWS with access keys
+  uses: KoalaOps/login-aws@v1
+  with:
+    aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    aws_region: us-east-1
+    enable_ecr_login: true
+```
 
 ### With ECR for Docker Operations
 
@@ -209,10 +257,54 @@ Ensure the IAM role has the necessary ECR permissions:
         "ecr:BatchGetImage"
       ],
       "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:PutImage",
+        "ecr:InitiateLayerUpload",
+        "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload"
+      ],
+      "Resource": "arn:aws:ecr:*:*:repository/*"
     }
   ]
 }
 ```
+
+For repository creation (`ecr_repositories`), add:
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "ecr:CreateRepository",
+    "ecr:DescribeRepositories"
+  ],
+  "Resource": "*"
+}
+```
+
+### EKS Access Fails
+
+Ensure the IAM role has the necessary EKS permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "eks:DescribeCluster",
+        "eks:ListClusters"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**Note:** You also need to be mapped in the EKS cluster's aws-auth ConfigMap or use EKS access entries.
 
 ## Support
 
