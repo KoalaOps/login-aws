@@ -12,8 +12,8 @@ inputs:
     required: true
   
   role_to_assume:
-    description: 'ARN of the IAM role to assume (required for OIDC)'
-    required: true
+    description: 'ARN of the IAM role to assume (for OIDC)'
+    required: false
   
   role_session_name:
     description: 'Name for the assumed role session'
@@ -24,7 +24,15 @@ inputs:
     description: 'Duration of the role session in seconds'
     required: false
     default: '3600'
-  
+
+  aws_access_key_id:
+    description: 'AWS Access Key ID (if not using OIDC)'
+    required: false
+
+  aws_secret_access_key:
+    description: 'AWS Secret Access Key (if not using OIDC)'
+    required: false
+
   enable_ecr_login:
     description: 'Enable Docker login to Amazon ECR'
     required: false
@@ -66,6 +74,8 @@ runs:
         role-to-assume: ${{ inputs.role_to_assume }}
         role-session-name: ${{ inputs.role_session_name }}
         role-duration-seconds: ${{ inputs.role_duration }}
+        aws-access-key-id: ${{ inputs.aws_access_key_id }}
+        aws-secret-access-key: ${{ inputs.aws_secret_access_key }}
         aws-region: ${{ inputs.aws_region }}
         mask-aws-account-id: false
 
