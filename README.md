@@ -89,10 +89,21 @@ Use `aws_access_key_id` and `aws_secret_access_key` for traditional authenticati
 | **Services** |
 | `enable_ecr_login` | Enable Docker login to ECR | ❌ | `false` |
 | `eks_cluster_name` | EKS cluster to configure kubectl for | ❌ | - |
-| `ecr_registries` | ECR registry IDs for cross-account access (comma-separated) | ❌ | - |
+| `ecr_registries` | AWS account IDs for cross-account ECR access (comma-separated) | ❌ | - |
 | `ecr_repositories` | ECR repositories to create if missing (comma-separated) | ❌ | - |
 
 *Either use OIDC (`role_to_assume`) or access keys (`aws_access_key_id` + `aws_secret_access_key`)
+
+## Quick Task Reference
+
+| Task | Required Inputs | Optional Inputs |
+|------|-----------------|------------------|
+| **EKS only** | `aws_region`, `eks_cluster_name`, auth* | - |
+| **ECR only** | `aws_region`, `enable_ecr_login: true`, auth* | `ecr_repositories`, `ecr_registries` |
+| **Both EKS & ECR** | `aws_region`, `eks_cluster_name`, `enable_ecr_login: true`, auth* | `ecr_repositories`, `ecr_registries` |
+| **Cross-account ECR** | `aws_region`, `enable_ecr_login: true`, `ecr_registries`, auth* | - |
+
+*auth = either `role_to_assume` (OIDC) or `aws_access_key_id` + `aws_secret_access_key`
 
 ## Outputs
 
@@ -100,7 +111,8 @@ Use `aws_access_key_id` and `aws_secret_access_key` for traditional authenticati
 |--------|-------------|
 | `aws_account_id` | AWS Account ID |
 | `ecr_registry` | ECR registry URL (if ECR login enabled) |
-| `eks_context` | Kubernetes context name (if EKS configured) |
+| `ecr_logged_in` | `true` if ECR login was performed, `false` otherwise |
+| `kubectl_context` | Kubernetes context name (if EKS configured) |
 
 ## ECR Parameters Explained
 
@@ -110,7 +122,8 @@ Use when you need to access ECR registries in **other AWS accounts**:
 - Pushing to a central registry account
 - Multi-account deployment pipelines
 
-Example: `ecr_registries: "123456789012,987654321098"`
+**Format:** Comma-separated AWS account IDs
+**Example:** `ecr_registries: "123456789012,987654321098"`
 
 ### When to use `ecr_repositories`
 Use when you want to **ensure repositories exist** in your account:
@@ -185,12 +198,26 @@ Example: `ecr_repositories: "backend,frontend,worker"`
 
 ```yaml
 - name: Login to AWS with multiple ECR registries
+  id: aws
   uses: KoalaOps/login-aws@v1
   with:
     role_to_assume: ${{ secrets.AWS_ROLE_ARN }}
     aws_region: us-east-1
     enable_ecr_login: true
-    ecr_registries: "123456789012,987654321098"
+    ecr_registries: "123456789012,987654321098"  # AWS Account IDs
+
+- name: Push to multiple registries
+  run: |
+    # Build image
+    docker build -t my-app:latest .
+
+    # Push to primary account
+    docker tag my-app:latest 123456789012.dkr.ecr.us-east-1.amazonaws.com/my-app:latest
+    docker push 123456789012.dkr.ecr.us-east-1.amazonaws.com/my-app:latest
+
+    # Push to secondary account
+    docker tag my-app:latest 987654321098.dkr.ecr.us-east-1.amazonaws.com/shared/my-app:latest
+    docker push 987654321098.dkr.ecr.us-east-1.amazonaws.com/shared/my-app:latest
 ```
 
 ### Long-Running Jobs

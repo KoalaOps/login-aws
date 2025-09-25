@@ -55,12 +55,16 @@ outputs:
   aws_account_id:
     description: 'AWS Account ID'
     value: ${{ steps.aws.outputs.aws-account-id }}
-  
+
   ecr_registry:
     description: 'ECR registry URL'
     value: ${{ steps.login-ecr.outputs.registry }}
-  
-  eks_context:
+
+  ecr_logged_in:
+    description: 'Whether ECR login was successful'
+    value: ${{ steps.ecr-status.outputs.logged_in }}
+
+  kubectl_context:
     description: 'Kubernetes context name if EKS was configured'
     value: ${{ steps.eks.outputs.context }}
 
@@ -96,10 +100,19 @@ runs:
         mask-password: true
 
     - name: Log ECR status
+      id: ecr-status
       if: inputs.enable_ecr_login == 'true'
       shell: bash
       run: |
         echo "::notice::📦 ECR login successful for registry: ${{ steps.login-ecr.outputs.registry }}"
+        echo "logged_in=true" >> $GITHUB_OUTPUT
+
+    - name: Set ECR not logged in
+      id: ecr-status-false
+      if: inputs.enable_ecr_login != 'true'
+      shell: bash
+      run: |
+        echo "logged_in=false" >> $GITHUB_OUTPUT
     
     - name: Ensure ECR repositories exist
       if: inputs.enable_ecr_login == 'true' && inputs.ecr_repositories != ''
