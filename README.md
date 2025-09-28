@@ -90,7 +90,7 @@ Use `aws_access_key_id` and `aws_secret_access_key` for traditional authenticati
 | `enable_ecr_login` | Enable Docker login to ECR | ❌ | `false` |
 | `eks_cluster_name` | EKS cluster to configure kubectl for | ❌ | - |
 | `ecr_registries` | AWS account IDs for cross-account ECR access (comma-separated) | ❌ | - |
-| `ecr_repositories` | ECR repositories to create if missing (comma-separated) | ❌ | - |
+| `ecr_repositories` | ECR repository to create if missing (currently limited to single repository) | ❌ | - |
 
 *Either use OIDC (`role_to_assume`) or access keys (`aws_access_key_id` + `aws_secret_access_key`)
 
@@ -126,12 +126,14 @@ Use when you need to access ECR registries in **other AWS accounts**:
 **Example:** `ecr_registries: "123456789012,987654321098"`
 
 ### When to use `ecr_repositories`
-Use when you want to **ensure repositories exist** in your account:
-- Auto-creating repos for new services
+Use when you want to **ensure a repository exists** in your account:
+- Auto-creating a repo for a new service
 - CI/CD pipelines that may run before infrastructure setup
 - Avoiding "repository not found" errors
 
-Example: `ecr_repositories: "backend,frontend,worker"`
+Example: `ecr_repositories: "my-app"`
+
+**Note:** Currently limited to a single repository. For multiple repositories, run the action multiple times or create them separately.
 
 **Note:** These can be used together - `ecr_registries` for cross-account access, `ecr_repositories` for repo creation.
 
@@ -166,16 +168,16 @@ Example: `ecr_repositories: "backend,frontend,worker"`
     docker push ${{ steps.login-aws.outputs.ecr_registry }}/my-app:latest
 ```
 
-### Ensure Multiple ECR Repositories
+### Ensure ECR Repository Exists
 
 ```yaml
-- name: Login and setup multiple ECR repos
+- name: Login and setup ECR repo
   uses: KoalaOps/login-aws@v1
   with:
     role_to_assume: ${{ secrets.AWS_ROLE_ARN }}
     aws_region: us-east-1
     enable_ecr_login: true
-    ecr_repositories: backend,frontend,worker  # Uses ensure-ecr-repository action internally
+    ecr_repositories: backend  # Currently limited to single repository
 ```
 
 ### With EKS for Kubernetes Operations

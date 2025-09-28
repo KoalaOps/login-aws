@@ -118,7 +118,8 @@ runs:
       if: inputs.enable_ecr_login == 'true' && inputs.ecr_repositories != ''
       uses: KoalaOps/ensure-ecr-repository@v1
       with:
-        repository-names: ${{ inputs.ecr_repositories }}
+        repository-name: ${{ inputs.ecr_repositories }}
+        aws-region: ${{ inputs.aws_region }}
 
     - name: Setup kubectl for EKS
       id: eks
