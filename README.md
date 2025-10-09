@@ -8,6 +8,7 @@ GitHub Action for authenticating to AWS using OIDC (OpenID Connect) or access ke
 - 🔑 **Access Key Support** - Fallback for environments without OIDC
 - 🐳 **ECR Integration** - Optional Docker registry login
 - ☸️ **EKS Support** - Configure kubectl for your clusters
+- 📦 **CodeArtifact Support** - Configure package managers (npm, pip, etc.)
 - 🔄 **Cross-Account Access** - Support for multiple ECR registries
 - ✅ **Automatic Verification** - Confirms successful authentication
 
@@ -91,6 +92,12 @@ Use `aws_access_key_id` and `aws_secret_access_key` for traditional authenticati
 | `eks_cluster_name` | EKS cluster to configure kubectl for | ❌ | - |
 | `ecr_registries` | AWS account IDs for cross-account ECR access (comma-separated) | ❌ | - |
 | `ecr_repositories` | ECR repository to create if missing (currently limited to single repository) | ❌ | - |
+| `codeartifact_domain` | CodeArtifact domain name | ❌ | - |
+| `codeartifact_repository` | CodeArtifact repository name | ❌ | - |
+| `codeartifact_tool` | Tool to configure (npm, pip, twine, dotnet, nuget, swift) | ❌ | - |
+| `codeartifact_region` | CodeArtifact region (defaults to `aws_region`) | ❌ | - |
+| `codeartifact_domain_owner` | AWS account ID that owns the domain (defaults to authenticated account) | ❌ | - |
+| `codeartifact_duration` | Token duration in seconds | ❌ | `43200` (12 hours) |
 
 *Either use OIDC (`role_to_assume`) or access keys (`aws_access_key_id` + `aws_secret_access_key`)
 
@@ -100,6 +107,7 @@ Use `aws_access_key_id` and `aws_secret_access_key` for traditional authenticati
 |------|-----------------|------------------|
 | **EKS only** | `aws_region`, `eks_cluster_name`, auth* | - |
 | **ECR only** | `aws_region`, `enable_ecr_login: true`, auth* | `ecr_repositories`, `ecr_registries` |
+| **CodeArtifact only** | `aws_region`, `codeartifact_domain`, `codeartifact_repository`, `codeartifact_tool`, auth* | `codeartifact_region`, `codeartifact_domain_owner`, `codeartifact_duration` |
 | **Both EKS & ECR** | `aws_region`, `eks_cluster_name`, `enable_ecr_login: true`, auth* | `ecr_repositories`, `ecr_registries` |
 | **Cross-account ECR** | `aws_region`, `enable_ecr_login: true`, `ecr_registries`, auth* | - |
 
@@ -113,6 +121,7 @@ Use `aws_access_key_id` and `aws_secret_access_key` for traditional authenticati
 | `ecr_registry` | ECR registry URL (if ECR login enabled) |
 | `ecr_logged_in` | `true` if ECR login was performed, `false` otherwise |
 | `kubectl_context` | Kubernetes context name (if EKS configured) |
+| `codeartifact_logged_in` | `true` if CodeArtifact login was performed, `false` otherwise |
 
 ## ECR Parameters Explained
 
@@ -136,6 +145,31 @@ Example: `ecr_repositories: "my-app"`
 **Note:** Currently limited to a single repository. For multiple repositories, run the action multiple times or create them separately.
 
 **Note:** These can be used together - `ecr_registries` for cross-account access, `ecr_repositories` for repo creation.
+
+## CodeArtifact Parameters Explained
+
+### Supported Tools
+CodeArtifact supports multiple package managers:
+- **npm** - Node.js package manager
+- **pip** - Python package installer
+- **twine** - Python package uploader
+- **dotnet** - .NET package manager
+- **nuget** - NuGet package manager
+- **swift** - Swift package manager
+
+### Required Parameters
+To enable CodeArtifact login, you must provide:
+- `codeartifact_domain` - Your CodeArtifact domain name
+- `codeartifact_repository` - The repository within the domain
+- `codeartifact_tool` - Which package manager to configure
+
+### Optional Parameters
+- `codeartifact_region` - Defaults to the main `aws_region` input
+- `codeartifact_domain_owner` - Defaults to the authenticated AWS account
+- `codeartifact_duration` - Token lifetime in seconds (default: 43200 = 12 hours)
+
+### Cross-Account Access
+For cross-account CodeArtifact access, specify the `codeartifact_domain_owner` parameter with the AWS account ID that owns the domain.
 
 ## Examples
 
@@ -220,6 +254,61 @@ Example: `ecr_repositories: "my-app"`
     # Push to secondary account
     docker tag my-app:latest 987654321098.dkr.ecr.us-east-1.amazonaws.com/shared/my-app:latest
     docker push 987654321098.dkr.ecr.us-east-1.amazonaws.com/shared/my-app:latest
+```
+
+### CodeArtifact for NPM
+
+```yaml
+- name: Login to AWS with CodeArtifact
+  uses: KoalaOps/login-aws@v1
+  with:
+    role_to_assume: ${{ secrets.AWS_ROLE_ARN }}
+    aws_region: us-east-1
+    codeartifact_domain: my-artifacts
+    codeartifact_repository: npm-store
+    codeartifact_tool: npm
+
+- name: Install dependencies
+  run: npm install
+
+- name: Publish package
+  run: npm publish
+```
+
+### CodeArtifact for Python/Pip
+
+```yaml
+- name: Login to AWS with CodeArtifact
+  uses: KoalaOps/login-aws@v1
+  with:
+    role_to_assume: ${{ secrets.AWS_ROLE_ARN }}
+    aws_region: us-east-1
+    codeartifact_domain: my-artifacts
+    codeartifact_repository: pypi-store
+    codeartifact_tool: pip
+
+- name: Install dependencies
+  run: pip install -r requirements.txt
+
+- name: Build and publish
+  run: |
+    python -m build
+    twine upload dist/*
+```
+
+### Cross-Account CodeArtifact
+
+```yaml
+- name: Login to AWS with cross-account CodeArtifact
+  uses: KoalaOps/login-aws@v1
+  with:
+    role_to_assume: ${{ secrets.AWS_ROLE_ARN }}
+    aws_region: us-east-1
+    codeartifact_domain: shared-artifacts
+    codeartifact_domain_owner: "123456789012"  # Different account
+    codeartifact_repository: npm-shared
+    codeartifact_tool: npm
+    codeartifact_duration: 43200  # 12 hours
 ```
 
 ### Long-Running Jobs
@@ -334,6 +423,49 @@ Ensure the IAM role has the necessary EKS permissions:
 ```
 
 **Note:** You also need to be mapped in the EKS cluster's aws-auth ConfigMap or use EKS access entries.
+
+### CodeArtifact Login Fails
+
+Ensure the IAM role has the necessary CodeArtifact permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "codeartifact:GetAuthorizationToken",
+        "codeartifact:GetRepositoryEndpoint",
+        "codeartifact:ReadFromRepository"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "sts:GetServiceBearerToken",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "sts:AWSServiceName": "codeartifact.amazonaws.com"
+        }
+      }
+    }
+  ]
+}
+```
+
+For publishing packages, add:
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "codeartifact:PublishPackageVersion",
+    "codeartifact:PutPackageMetadata"
+  ],
+  "Resource": "*"
+}
+```
 
 ## Support
 
