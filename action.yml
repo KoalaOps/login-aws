@@ -51,6 +51,31 @@ inputs:
     required: false
     default: ''
 
+  codeartifact_domain:
+    description: 'CodeArtifact domain name'
+    required: false
+
+  codeartifact_repository:
+    description: 'CodeArtifact repository name'
+    required: false
+
+  codeartifact_tool:
+    description: 'Tool to configure for CodeArtifact (npm, pip, twine, dotnet, nuget, swift)'
+    required: false
+
+  codeartifact_region:
+    description: 'Region for CodeArtifact (defaults to aws_region if not specified)'
+    required: false
+
+  codeartifact_domain_owner:
+    description: 'AWS account ID that owns the CodeArtifact domain (defaults to authenticated account)'
+    required: false
+
+  codeartifact_duration:
+    description: 'Duration of the CodeArtifact token in seconds'
+    required: false
+    default: '43200'
+
 outputs:
   aws_account_id:
     description: 'AWS Account ID'
@@ -67,6 +92,10 @@ outputs:
   kubectl_context:
     description: 'Kubernetes context name if EKS was configured'
     value: ${{ steps.eks.outputs.context }}
+
+  codeartifact_logged_in:
+    description: 'Whether CodeArtifact login was successful'
+    value: ${{ steps.codeartifact-status.outputs.logged_in }}
 
 runs:
   using: 'composite'
@@ -146,6 +175,54 @@ runs:
         echo "📍 Context: $CONTEXT"
         echo "::endgroup::"
 
+    - name: Login to AWS CodeArtifact
+      id: codeartifact
+      if: inputs.codeartifact_domain != '' && inputs.codeartifact_repository != '' && inputs.codeartifact_tool != ''
+      shell: bash
+      run: |
+        echo "::group::CodeArtifact Configuration"
+
+        # Set defaults
+        CA_REGION="${{ inputs.codeartifact_region }}"
+        if [[ -z "$CA_REGION" ]]; then
+          CA_REGION="${{ inputs.aws_region }}"
+        fi
+
+        CA_DOMAIN_OWNER="${{ inputs.codeartifact_domain_owner }}"
+        if [[ -z "$CA_DOMAIN_OWNER" ]]; then
+          CA_DOMAIN_OWNER="${{ steps.aws.outputs.aws-account-id }}"
+        fi
+
+        # Login to CodeArtifact
+        aws codeartifact login \
+          --tool ${{ inputs.codeartifact_tool }} \
+          --domain ${{ inputs.codeartifact_domain }} \
+          --domain-owner $CA_DOMAIN_OWNER \
+          --repository ${{ inputs.codeartifact_repository }} \
+          --region $CA_REGION \
+          --duration-seconds ${{ inputs.codeartifact_duration }}
+
+        echo "✅ CodeArtifact login successful"
+        echo "📦 Domain: ${{ inputs.codeartifact_domain }}"
+        echo "📦 Repository: ${{ inputs.codeartifact_repository }}"
+        echo "🔧 Tool: ${{ inputs.codeartifact_tool }}"
+        echo "::endgroup::"
+
+    - name: Log CodeArtifact status
+      id: codeartifact-status
+      if: inputs.codeartifact_domain != '' && inputs.codeartifact_repository != '' && inputs.codeartifact_tool != ''
+      shell: bash
+      run: |
+        echo "::notice::📦 CodeArtifact login successful for ${{ inputs.codeartifact_tool }}"
+        echo "logged_in=true" >> $GITHUB_OUTPUT
+
+    - name: Set CodeArtifact not logged in
+      id: codeartifact-status-false
+      if: inputs.codeartifact_domain == '' || inputs.codeartifact_repository == '' || inputs.codeartifact_tool == ''
+      shell: bash
+      run: |
+        echo "logged_in=false" >> $GITHUB_OUTPUT
+
     - name: Summary
       shell: bash
       run: |
@@ -165,4 +242,8 @@ runs:
         
         if [[ -n "${{ inputs.eks_cluster_name }}" ]]; then
           echo "| **EKS** | ✅ Configured | Cluster: ${{ inputs.eks_cluster_name }} |" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        if [[ -n "${{ inputs.codeartifact_domain }}" ]] && [[ -n "${{ inputs.codeartifact_repository }}" ]] && [[ -n "${{ inputs.codeartifact_tool }}" ]]; then
+          echo "| **CodeArtifact** | ✅ Configured | Domain: ${{ inputs.codeartifact_domain }}, Repo: ${{ inputs.codeartifact_repository }}, Tool: ${{ inputs.codeartifact_tool }} |" >> $GITHUB_STEP_SUMMARY
         fi
