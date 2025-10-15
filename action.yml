@@ -60,7 +60,7 @@ inputs:
     required: false
 
   codeartifact_tool:
-    description: 'Tool to configure for CodeArtifact (npm, pip, twine, dotnet, nuget, swift)'
+    description: 'Tool to configure for CodeArtifact (npm, pip, twine, dotnet, nuget, swift, maven, gradle)'
     required: false
 
   codeartifact_region:
@@ -96,6 +96,10 @@ outputs:
   codeartifact_logged_in:
     description: 'Whether CodeArtifact login was successful'
     value: ${{ steps.codeartifact-status.outputs.logged_in }}
+
+  codeartifact_endpoint:
+    description: 'CodeArtifact repository endpoint URL (only set for maven/gradle)'
+    value: ${{ steps.codeartifact-maven-gradle.outputs.endpoint }}
 
 runs:
   using: 'composite'
@@ -175,9 +179,23 @@ runs:
         echo "📍 Context: $CONTEXT"
         echo "::endgroup::"
 
-    - name: Login to AWS CodeArtifact
-      id: codeartifact
+    - name: Validate CodeArtifact tool
       if: inputs.codeartifact_domain != '' && inputs.codeartifact_repository != '' && inputs.codeartifact_tool != ''
+      shell: bash
+      run: |
+        case "${{ inputs.codeartifact_tool }}" in
+          npm|pip|twine|dotnet|nuget|swift|maven|gradle)
+            # Valid tool
+            ;;
+          *)
+            echo "::error::Unsupported codeartifact_tool: '${{ inputs.codeartifact_tool }}'. Supported tools: npm, pip, twine, dotnet, nuget, swift, maven, gradle"
+            exit 1
+            ;;
+        esac
+
+    - name: Login to AWS CodeArtifact (npm, pip, twine, etc.)
+      id: codeartifact
+      if: inputs.codeartifact_domain != '' && inputs.codeartifact_repository != '' && inputs.codeartifact_tool != '' && inputs.codeartifact_tool != 'maven' && inputs.codeartifact_tool != 'gradle'
       shell: bash
       run: |
         echo "::group::CodeArtifact Configuration"
@@ -195,12 +213,12 @@ runs:
 
         # Login to CodeArtifact
         aws codeartifact login \
-          --tool ${{ inputs.codeartifact_tool }} \
-          --domain ${{ inputs.codeartifact_domain }} \
-          --domain-owner $CA_DOMAIN_OWNER \
-          --repository ${{ inputs.codeartifact_repository }} \
-          --region $CA_REGION \
-          --duration-seconds ${{ inputs.codeartifact_duration }}
+          --tool "${{ inputs.codeartifact_tool }}" \
+          --domain "${{ inputs.codeartifact_domain }}" \
+          --domain-owner "$CA_DOMAIN_OWNER" \
+          --repository "${{ inputs.codeartifact_repository }}" \
+          --region "$CA_REGION" \
+          --duration-seconds "${{ inputs.codeartifact_duration }}"
 
         echo "✅ CodeArtifact login successful"
         echo "📦 Domain: ${{ inputs.codeartifact_domain }}"
@@ -208,12 +226,87 @@ runs:
         echo "🔧 Tool: ${{ inputs.codeartifact_tool }}"
         echo "::endgroup::"
 
+    - name: Setup AWS CodeArtifact for Maven/Gradle
+      id: codeartifact-maven-gradle
+      if: inputs.codeartifact_domain != '' && inputs.codeartifact_repository != '' && (inputs.codeartifact_tool == 'maven' || inputs.codeartifact_tool == 'gradle')
+      shell: bash
+      run: |
+        echo "::group::CodeArtifact Configuration for ${{ inputs.codeartifact_tool }}"
+
+        # Set defaults
+        CA_REGION="${{ inputs.codeartifact_region }}"
+        if [[ -z "$CA_REGION" ]]; then
+          CA_REGION="${{ inputs.aws_region }}"
+        fi
+
+        CA_DOMAIN_OWNER="${{ inputs.codeartifact_domain_owner }}"
+        if [[ -z "$CA_DOMAIN_OWNER" ]]; then
+          CA_DOMAIN_OWNER="${{ steps.aws.outputs.aws-account-id }}"
+        fi
+
+        # Get CodeArtifact authorization token
+        echo "Fetching CodeArtifact authorization token..."
+        CODEARTIFACT_AUTH_TOKEN="$(aws codeartifact get-authorization-token \
+          --domain "${{ inputs.codeartifact_domain }}" \
+          --domain-owner "$CA_DOMAIN_OWNER" \
+          --region "$CA_REGION" \
+          --duration-seconds "${{ inputs.codeartifact_duration }}" \
+          --query authorizationToken \
+          --output text)"
+
+        # Mask the token in logs
+        echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+
+        # Export token as environment variable
+        echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> $GITHUB_ENV
+
+        # Get repository endpoint URL
+        echo "Fetching CodeArtifact repository endpoint..."
+        CODEARTIFACT_REPO_URL="$(aws codeartifact get-repository-endpoint \
+          --domain "${{ inputs.codeartifact_domain }}" \
+          --domain-owner "$CA_DOMAIN_OWNER" \
+          --repository "${{ inputs.codeartifact_repository }}" \
+          --format maven \
+          --region "$CA_REGION" \
+          --query repositoryEndpoint \
+          --output text)"
+
+        # Export endpoint as environment variable
+        echo "CODEARTIFACT_REPO_URL=$CODEARTIFACT_REPO_URL" >> $GITHUB_ENV
+
+        # Set as output
+        echo "endpoint=$CODEARTIFACT_REPO_URL" >> $GITHUB_OUTPUT
+
+        echo "✅ CodeArtifact token and endpoint configured"
+        echo "📦 Domain: ${{ inputs.codeartifact_domain }}"
+        echo "📦 Repository: ${{ inputs.codeartifact_repository }}"
+        echo "🔧 Tool: ${{ inputs.codeartifact_tool }}"
+        echo "🔗 Endpoint: $CODEARTIFACT_REPO_URL"
+        echo ""
+        echo "💡 Environment variables set:"
+        echo "   - CODEARTIFACT_AUTH_TOKEN (masked)"
+        echo "   - CODEARTIFACT_REPO_URL"
+        echo ""
+        echo "📝 Next steps:"
+        if [[ "${{ inputs.codeartifact_tool }}" == "maven" ]]; then
+          echo "   Configure your settings.xml to use \${env.CODEARTIFACT_AUTH_TOKEN}"
+          echo "   and \${env.CODEARTIFACT_REPO_URL}"
+        else
+          echo "   Configure your build.gradle to use System.env.CODEARTIFACT_AUTH_TOKEN"
+          echo "   and System.env.CODEARTIFACT_REPO_URL"
+        fi
+        echo "::endgroup::"
+
     - name: Log CodeArtifact status
       id: codeartifact-status
       if: inputs.codeartifact_domain != '' && inputs.codeartifact_repository != '' && inputs.codeartifact_tool != ''
       shell: bash
       run: |
-        echo "::notice::📦 CodeArtifact login successful for ${{ inputs.codeartifact_tool }}"
+        if [[ "${{ inputs.codeartifact_tool }}" == "maven" ]] || [[ "${{ inputs.codeartifact_tool }}" == "gradle" ]]; then
+          echo "::notice::📦 CodeArtifact token configured for ${{ inputs.codeartifact_tool }}"
+        else
+          echo "::notice::📦 CodeArtifact login successful for ${{ inputs.codeartifact_tool }}"
+        fi
         echo "logged_in=true" >> $GITHUB_OUTPUT
 
     - name: Set CodeArtifact not logged in
