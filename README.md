@@ -94,7 +94,7 @@ Use `aws_access_key_id` and `aws_secret_access_key` for traditional authenticati
 | `ecr_repositories` | ECR repository to create if missing (currently limited to single repository) | ❌ | - |
 | `codeartifact_domain` | CodeArtifact domain name | ❌ | - |
 | `codeartifact_repository` | CodeArtifact repository name | ❌ | - |
-| `codeartifact_tool` | Tool to configure (npm, pip, twine, dotnet, nuget, swift) | ❌ | - |
+| `codeartifact_tool` | Tool to configure (npm, pip, twine, dotnet, nuget, swift, maven, gradle) | ❌ | - |
 | `codeartifact_region` | CodeArtifact region (defaults to `aws_region`) | ❌ | - |
 | `codeartifact_domain_owner` | AWS account ID that owns the domain (defaults to authenticated account) | ❌ | - |
 | `codeartifact_duration` | Token duration in seconds | ❌ | `43200` (12 hours) |
@@ -122,6 +122,8 @@ Use `aws_access_key_id` and `aws_secret_access_key` for traditional authenticati
 | `ecr_logged_in` | `true` if ECR login was performed, `false` otherwise |
 | `kubectl_context` | Kubernetes context name (if EKS configured) |
 | `codeartifact_logged_in` | `true` if CodeArtifact login was performed, `false` otherwise |
+| `codeartifact_token` | CodeArtifact authorization token (only set for maven/gradle) |
+| `codeartifact_endpoint` | CodeArtifact repository endpoint URL (only set for maven/gradle) |
 
 ## ECR Parameters Explained
 
@@ -156,6 +158,10 @@ CodeArtifact supports multiple package managers:
 - **dotnet** - .NET package manager
 - **nuget** - NuGet package manager
 - **swift** - Swift package manager
+- **maven** - Java/JVM package manager (token-based auth)
+- **gradle** - Java/JVM build tool (token-based auth)
+
+**Note:** For Maven and Gradle, this action exports environment variables (`CODEARTIFACT_AUTH_TOKEN` and `CODEARTIFACT_REPO_URL`) that you'll reference in your configuration files, since the AWS CLI `login` command doesn't support these tools natively.
 
 ### Required Parameters
 To enable CodeArtifact login, you must provide:
@@ -309,6 +315,171 @@ For cross-account CodeArtifact access, specify the `codeartifact_domain_owner` p
     codeartifact_repository: npm-shared
     codeartifact_tool: npm
     codeartifact_duration: 43200  # 12 hours
+```
+
+### CodeArtifact for Maven
+
+```yaml
+- name: Login to AWS with CodeArtifact
+  uses: KoalaOps/login-aws@v1
+  with:
+    role_to_assume: ${{ secrets.AWS_ROLE_ARN }}
+    aws_region: us-east-1
+    codeartifact_domain: my-artifacts
+    codeartifact_repository: maven-repo
+    codeartifact_tool: maven
+
+- name: Build with Maven
+  run: mvn clean install
+
+- name: Publish to CodeArtifact
+  run: mvn deploy
+```
+
+**Required `~/.m2/settings.xml` configuration:**
+
+```xml
+<settings>
+  <servers>
+    <server>
+      <id>codeartifact</id>
+      <username>aws</username>
+      <password>${env.CODEARTIFACT_AUTH_TOKEN}</password>
+    </server>
+  </servers>
+
+  <profiles>
+    <profile>
+      <id>codeartifact</id>
+      <repositories>
+        <repository>
+          <id>codeartifact</id>
+          <url>${env.CODEARTIFACT_REPO_URL}</url>
+        </repository>
+      </repositories>
+    </profile>
+  </profiles>
+
+  <activeProfiles>
+    <activeProfile>codeartifact</activeProfile>
+  </activeProfiles>
+</settings>
+```
+
+Alternatively, you can create the settings.xml in your workflow:
+
+```yaml
+- name: Login to AWS with CodeArtifact
+  uses: KoalaOps/login-aws@v1
+  with:
+    role_to_assume: ${{ secrets.AWS_ROLE_ARN }}
+    aws_region: us-east-1
+    codeartifact_domain: my-artifacts
+    codeartifact_repository: maven-repo
+    codeartifact_tool: maven
+
+- name: Create Maven settings.xml
+  run: |
+    mkdir -p ~/.m2
+    cat > ~/.m2/settings.xml << 'EOF'
+    <settings>
+      <servers>
+        <server>
+          <id>codeartifact</id>
+          <username>aws</username>
+          <password>${env.CODEARTIFACT_AUTH_TOKEN}</password>
+        </server>
+      </servers>
+      <profiles>
+        <profile>
+          <id>codeartifact</id>
+          <repositories>
+            <repository>
+              <id>codeartifact</id>
+              <url>${env.CODEARTIFACT_REPO_URL}</url>
+            </repository>
+          </repositories>
+        </profile>
+      </profiles>
+      <activeProfiles>
+        <activeProfile>codeartifact</activeProfile>
+      </activeProfiles>
+    </settings>
+    EOF
+
+- name: Build and deploy
+  run: mvn clean deploy
+```
+
+### CodeArtifact for Gradle
+
+```yaml
+- name: Login to AWS with CodeArtifact
+  uses: KoalaOps/login-aws@v1
+  with:
+    role_to_assume: ${{ secrets.AWS_ROLE_ARN }}
+    aws_region: us-east-1
+    codeartifact_domain: my-artifacts
+    codeartifact_repository: maven-repo
+    codeartifact_tool: gradle
+
+- name: Build with Gradle
+  run: ./gradlew build
+
+- name: Publish to CodeArtifact
+  run: ./gradlew publish
+```
+
+**Required `build.gradle` configuration:**
+
+```groovy
+repositories {
+    maven {
+        url System.env.CODEARTIFACT_REPO_URL
+        credentials {
+            username "aws"
+            password System.env.CODEARTIFACT_AUTH_TOKEN
+        }
+    }
+}
+
+publishing {
+    repositories {
+        maven {
+            url System.env.CODEARTIFACT_REPO_URL
+            credentials {
+                username "aws"
+                password System.env.CODEARTIFACT_AUTH_TOKEN
+            }
+        }
+    }
+}
+```
+
+**Or for Kotlin DSL (`build.gradle.kts`):**
+
+```kotlin
+repositories {
+    maven {
+        url = uri(System.getenv("CODEARTIFACT_REPO_URL") ?: "")
+        credentials {
+            username = "aws"
+            password = System.getenv("CODEARTIFACT_AUTH_TOKEN") ?: ""
+        }
+    }
+}
+
+publishing {
+    repositories {
+        maven {
+            url = uri(System.getenv("CODEARTIFACT_REPO_URL") ?: "")
+            credentials {
+                username = "aws"
+                password = System.getenv("CODEARTIFACT_AUTH_TOKEN") ?: ""
+            }
+        }
+    }
+}
 ```
 
 ### Long-Running Jobs
