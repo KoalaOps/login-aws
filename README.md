@@ -122,8 +122,9 @@ Use `aws_access_key_id` and `aws_secret_access_key` for traditional authenticati
 | `ecr_logged_in` | `true` if ECR login was performed, `false` otherwise |
 | `kubectl_context` | Kubernetes context name (if EKS configured) |
 | `codeartifact_logged_in` | `true` if CodeArtifact login was performed, `false` otherwise |
-| `codeartifact_token` | CodeArtifact authorization token (only set for maven/gradle) |
 | `codeartifact_endpoint` | CodeArtifact repository endpoint URL (only set for maven/gradle) |
+
+**Note:** For Maven/Gradle, the authorization token is available via the `CODEARTIFACT_AUTH_TOKEN` environment variable (not exposed as an output for security).
 
 ## ECR Parameters Explained
 
@@ -365,6 +366,19 @@ For cross-account CodeArtifact access, specify the `codeartifact_domain_owner` p
   </activeProfiles>
 </settings>
 ```
+
+**For publishing packages, add to your `pom.xml`:**
+
+```xml
+<distributionManagement>
+  <repository>
+    <id>codeartifact</id>
+    <url>${env.CODEARTIFACT_REPO_URL}</url>
+  </repository>
+</distributionManagement>
+```
+
+**Important:** The `<id>` in `distributionManagement` must match the `<server><id>` in `settings.xml` for authentication to work.
 
 Alternatively, you can create the settings.xml in your workflow:
 

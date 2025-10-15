@@ -97,10 +97,6 @@ outputs:
     description: 'Whether CodeArtifact login was successful'
     value: ${{ steps.codeartifact-status.outputs.logged_in }}
 
-  codeartifact_token:
-    description: 'CodeArtifact authorization token (only set for maven/gradle)'
-    value: ${{ steps.codeartifact-maven-gradle.outputs.token }}
-
   codeartifact_endpoint:
     description: 'CodeArtifact repository endpoint URL (only set for maven/gradle)'
     value: ${{ steps.codeartifact-maven-gradle.outputs.endpoint }}
@@ -183,6 +179,20 @@ runs:
         echo "📍 Context: $CONTEXT"
         echo "::endgroup::"
 
+    - name: Validate CodeArtifact tool
+      if: inputs.codeartifact_domain != '' && inputs.codeartifact_repository != '' && inputs.codeartifact_tool != ''
+      shell: bash
+      run: |
+        case "${{ inputs.codeartifact_tool }}" in
+          npm|pip|twine|dotnet|nuget|swift|maven|gradle)
+            # Valid tool
+            ;;
+          *)
+            echo "::error::Unsupported codeartifact_tool: '${{ inputs.codeartifact_tool }}'. Supported tools: npm, pip, twine, dotnet, nuget, swift, maven, gradle"
+            exit 1
+            ;;
+        esac
+
     - name: Login to AWS CodeArtifact (npm, pip, twine, etc.)
       id: codeartifact
       if: inputs.codeartifact_domain != '' && inputs.codeartifact_repository != '' && inputs.codeartifact_tool != '' && inputs.codeartifact_tool != 'maven' && inputs.codeartifact_tool != 'gradle'
@@ -203,12 +213,12 @@ runs:
 
         # Login to CodeArtifact
         aws codeartifact login \
-          --tool ${{ inputs.codeartifact_tool }} \
-          --domain ${{ inputs.codeartifact_domain }} \
-          --domain-owner $CA_DOMAIN_OWNER \
-          --repository ${{ inputs.codeartifact_repository }} \
-          --region $CA_REGION \
-          --duration-seconds ${{ inputs.codeartifact_duration }}
+          --tool "${{ inputs.codeartifact_tool }}" \
+          --domain "${{ inputs.codeartifact_domain }}" \
+          --domain-owner "$CA_DOMAIN_OWNER" \
+          --repository "${{ inputs.codeartifact_repository }}" \
+          --region "$CA_REGION" \
+          --duration-seconds "${{ inputs.codeartifact_duration }}"
 
         echo "✅ CodeArtifact login successful"
         echo "📦 Domain: ${{ inputs.codeartifact_domain }}"
@@ -236,13 +246,13 @@ runs:
 
         # Get CodeArtifact authorization token
         echo "Fetching CodeArtifact authorization token..."
-        CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
-          --domain ${{ inputs.codeartifact_domain }} \
-          --domain-owner $CA_DOMAIN_OWNER \
-          --region $CA_REGION \
-          --duration-seconds ${{ inputs.codeartifact_duration }} \
+        CODEARTIFACT_AUTH_TOKEN="$(aws codeartifact get-authorization-token \
+          --domain "${{ inputs.codeartifact_domain }}" \
+          --domain-owner "$CA_DOMAIN_OWNER" \
+          --region "$CA_REGION" \
+          --duration-seconds "${{ inputs.codeartifact_duration }}" \
           --query authorizationToken \
-          --output text)
+          --output text)"
 
         # Mask the token in logs
         echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
@@ -250,19 +260,16 @@ runs:
         # Export token as environment variable
         echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> $GITHUB_ENV
 
-        # Set as output (masked)
-        echo "token=$CODEARTIFACT_AUTH_TOKEN" >> $GITHUB_OUTPUT
-
         # Get repository endpoint URL
         echo "Fetching CodeArtifact repository endpoint..."
-        CODEARTIFACT_REPO_URL=$(aws codeartifact get-repository-endpoint \
-          --domain ${{ inputs.codeartifact_domain }} \
-          --domain-owner $CA_DOMAIN_OWNER \
-          --repository ${{ inputs.codeartifact_repository }} \
+        CODEARTIFACT_REPO_URL="$(aws codeartifact get-repository-endpoint \
+          --domain "${{ inputs.codeartifact_domain }}" \
+          --domain-owner "$CA_DOMAIN_OWNER" \
+          --repository "${{ inputs.codeartifact_repository }}" \
           --format maven \
-          --region $CA_REGION \
+          --region "$CA_REGION" \
           --query repositoryEndpoint \
-          --output text)
+          --output text)"
 
         # Export endpoint as environment variable
         echo "CODEARTIFACT_REPO_URL=$CODEARTIFACT_REPO_URL" >> $GITHUB_ENV
