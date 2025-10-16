@@ -98,6 +98,7 @@ Use `aws_access_key_id` and `aws_secret_access_key` for traditional authenticati
 | `codeartifact_region` | CodeArtifact region (defaults to `aws_region`) | ❌ | - |
 | `codeartifact_domain_owner` | AWS account ID that owns the domain (defaults to authenticated account) | ❌ | - |
 | `codeartifact_duration` | Token duration in seconds | ❌ | `43200` (12 hours) |
+| `codeartifact_output_token` | Output token as env vars instead of auto-login (useful for Docker builds) | ❌ | `false` |
 
 *Either use OIDC (`role_to_assume`) or access keys (`aws_access_key_id` + `aws_secret_access_key`)
 
@@ -122,9 +123,9 @@ Use `aws_access_key_id` and `aws_secret_access_key` for traditional authenticati
 | `ecr_logged_in` | `true` if ECR login was performed, `false` otherwise |
 | `kubectl_context` | Kubernetes context name (if EKS configured) |
 | `codeartifact_logged_in` | `true` if CodeArtifact login was performed, `false` otherwise |
-| `codeartifact_endpoint` | CodeArtifact repository endpoint URL (only set for maven/gradle) |
+| `codeartifact_endpoint` | CodeArtifact repository endpoint URL (set when using token-based auth) |
 
-**Note:** For Maven/Gradle, the authorization token is available via the `CODEARTIFACT_AUTH_TOKEN` environment variable (not exposed as an output for security).
+**Note:** When using token-based authentication (Maven/Gradle or when `codeartifact_output_token: 'true'`), the authorization token is available via the `CODEARTIFACT_AUTH_TOKEN` environment variable. For security reasons, the token is not exposed as an output, only as a masked environment variable.
 
 ## ECR Parameters Explained
 
@@ -162,7 +163,22 @@ CodeArtifact supports multiple package managers:
 - **maven** - Java/JVM package manager (token-based auth)
 - **gradle** - Java/JVM build tool (token-based auth)
 
-**Note:** For Maven and Gradle, this action exports environment variables (`CODEARTIFACT_AUTH_TOKEN` and `CODEARTIFACT_REPO_URL`) that you'll reference in your configuration files, since the AWS CLI `login` command doesn't support these tools natively.
+**Note:** For Maven and Gradle, this action always uses token-based authentication and exports environment variables (`CODEARTIFACT_AUTH_TOKEN` and `CODEARTIFACT_REPO_URL`) that you'll reference in your configuration files, since the AWS CLI `login` command doesn't support these tools natively.
+
+### Token-Based Authentication
+
+By default, this action uses the simple `aws codeartifact login` command for npm, pip, twine, dotnet, nuget, and swift. This modifies local configuration files (e.g., `~/.npmrc` for npm).
+
+However, if you need the token explicitly (such as for Docker builds where local config isn't available), set `codeartifact_output_token: 'true'`. This will:
+- Export `CODEARTIFACT_AUTH_TOKEN` as a masked environment variable
+- Export `CODEARTIFACT_REPO_URL` as an environment variable
+- Set `codeartifact_endpoint` output for easy access
+
+**When to use token mode:**
+- Docker builds that need to install packages inside containers
+- Custom authentication flows
+- Multi-stage builds where config files don't persist
+- When you need to pass credentials as build arguments
 
 ### Required Parameters
 To enable CodeArtifact login, you must provide:
@@ -442,6 +458,87 @@ Alternatively, you can create the settings.xml in your workflow:
 
 - name: Publish to CodeArtifact
   run: ./gradlew publish
+```
+
+### CodeArtifact Token Mode for Docker Builds
+
+When building Docker images that need to install packages from CodeArtifact, you need to use token mode:
+
+```yaml
+- name: Login to AWS with CodeArtifact (token mode)
+  id: aws
+  uses: KoalaOps/login-aws@v1
+  with:
+    role_to_assume: ${{ secrets.AWS_ROLE_ARN }}
+    aws_region: us-east-1
+    codeartifact_domain: my-artifacts
+    codeartifact_repository: npm-store
+    codeartifact_tool: npm
+    codeartifact_output_token: 'true'  # Enable token mode
+    enable_ecr_login: true
+
+- name: Build Docker image with CodeArtifact access
+  run: |
+    docker build \
+      --build-arg CODEARTIFACT_AUTH_TOKEN=${{ env.CODEARTIFACT_AUTH_TOKEN }} \
+      --build-arg CODEARTIFACT_REPO_URL=${{ env.CODEARTIFACT_REPO_URL }} \
+      -t my-app:latest \
+      .
+
+- name: Push to ECR
+  run: |
+    docker tag my-app:latest ${{ steps.aws.outputs.ecr_registry }}/my-app:latest
+    docker push ${{ steps.aws.outputs.ecr_registry }}/my-app:latest
+```
+
+**Dockerfile example for npm:**
+
+```dockerfile
+FROM node:18-alpine
+
+ARG CODEARTIFACT_AUTH_TOKEN
+ARG CODEARTIFACT_REPO_URL
+
+WORKDIR /app
+
+# Configure npm to use CodeArtifact
+RUN npm config set registry ${CODEARTIFACT_REPO_URL}
+RUN echo "${CODEARTIFACT_REPO_URL#https:}:_authToken=${CODEARTIFACT_AUTH_TOKEN}" > .npmrc
+
+# Install dependencies
+COPY package*.json ./
+RUN npm install
+
+# Copy application code
+COPY . .
+
+# Build application
+RUN npm run build
+
+CMD ["npm", "start"]
+```
+
+**Dockerfile example for Python/pip:**
+
+```dockerfile
+FROM python:3.11-slim
+
+ARG CODEARTIFACT_AUTH_TOKEN
+ARG CODEARTIFACT_REPO_URL
+
+WORKDIR /app
+
+# Configure pip to use CodeArtifact
+RUN pip config set global.index-url https://aws:${CODEARTIFACT_AUTH_TOKEN}@${CODEARTIFACT_REPO_URL#https://}simple/
+
+# Install dependencies
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
+
+# Copy application code
+COPY . .
+
+CMD ["python", "app.py"]
 ```
 
 **Required `build.gradle` configuration:**
