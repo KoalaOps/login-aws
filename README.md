@@ -98,6 +98,7 @@ Use `aws_access_key_id` and `aws_secret_access_key` for traditional authenticati
 | `codeartifact_region` | CodeArtifact region (defaults to `aws_region`) | ❌ | - |
 | `codeartifact_domain_owner` | AWS account ID that owns the domain (defaults to authenticated account) | ❌ | - |
 | `codeartifact_duration` | Token duration in seconds | ❌ | `43200` (12 hours) |
+| `codeartifact_namespace` | CodeArtifact namespace for the repository | ❌ | - |
 | `codeartifact_output_token` | Output token as env vars instead of auto-login (useful for Docker builds) | ❌ | `false` |
 
 *Either use OIDC (`role_to_assume`) or access keys (`aws_access_key_id` + `aws_secret_access_key`)
@@ -190,6 +191,7 @@ To enable CodeArtifact login, you must provide:
 - `codeartifact_region` - Defaults to the main `aws_region` input
 - `codeartifact_domain_owner` - Defaults to the authenticated AWS account
 - `codeartifact_duration` - Token lifetime in seconds (default: 43200 = 12 hours)
+- `codeartifact_namespace` - Namespace for the repository (e.g., `com.mycompany` for Maven, `my-org` for npm)
 
 ### Cross-Account Access
 For cross-account CodeArtifact access, specify the `codeartifact_domain_owner` parameter with the AWS account ID that owns the domain.
@@ -290,6 +292,7 @@ For cross-account CodeArtifact access, specify the `codeartifact_domain_owner` p
     codeartifact_domain: my-artifacts
     codeartifact_repository: npm-store
     codeartifact_tool: npm
+    codeartifact_namespace: my-org  # Optional: specify namespace
 
 - name: Install dependencies
   run: npm install
@@ -309,6 +312,7 @@ For cross-account CodeArtifact access, specify the `codeartifact_domain_owner` p
     codeartifact_domain: my-artifacts
     codeartifact_repository: pypi-store
     codeartifact_tool: pip
+    codeartifact_namespace: my-org  # Optional: specify namespace
 
 - name: Install dependencies
   run: pip install -r requirements.txt
@@ -331,6 +335,7 @@ For cross-account CodeArtifact access, specify the `codeartifact_domain_owner` p
     codeartifact_domain_owner: "123456789012"  # Different account
     codeartifact_repository: npm-shared
     codeartifact_tool: npm
+    codeartifact_namespace: shared-org  # Optional: specify namespace
     codeartifact_duration: 43200  # 12 hours
 ```
 
@@ -345,6 +350,7 @@ For cross-account CodeArtifact access, specify the `codeartifact_domain_owner` p
     codeartifact_domain: my-artifacts
     codeartifact_repository: maven-repo
     codeartifact_tool: maven
+    codeartifact_namespace: com.mycompany  # Optional: specify namespace
 
 - name: Build with Maven
   run: mvn clean install
@@ -452,6 +458,7 @@ Alternatively, you can create the settings.xml in your workflow:
     codeartifact_domain: my-artifacts
     codeartifact_repository: maven-repo
     codeartifact_tool: gradle
+    codeartifact_namespace: com.mycompany  # Optional: specify namespace
 
 - name: Build with Gradle
   run: ./gradlew build
@@ -474,6 +481,7 @@ When building Docker images that need to install packages from CodeArtifact, you
     codeartifact_domain: my-artifacts
     codeartifact_repository: npm-store
     codeartifact_tool: npm
+    codeartifact_namespace: my-org  # Optional: specify namespace
     codeartifact_output_token: 'true'  # Enable token mode
     enable_ecr_login: true
 

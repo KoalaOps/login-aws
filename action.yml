@@ -76,6 +76,10 @@ inputs:
     required: false
     default: '43200'
 
+  codeartifact_namespace:
+    description: 'CodeArtifact namespace for the repository'
+    required: false
+
   codeartifact_output_token:
     description: 'Output the CodeArtifact token instead of using aws codeartifact login (useful for custom configurations)'
     required: false
@@ -223,12 +227,16 @@ runs:
           --domain-owner "$CA_DOMAIN_OWNER" \
           --repository "${{ inputs.codeartifact_repository }}" \
           --region "$CA_REGION" \
-          --duration-seconds "${{ inputs.codeartifact_duration }}"
+          --duration-seconds "${{ inputs.codeartifact_duration }}" \
+          ${{ inputs.codeartifact_namespace != '' && format('--namespace {0}', inputs.codeartifact_namespace) || '' }}
 
         echo "✅ CodeArtifact login successful"
         echo "📦 Domain: ${{ inputs.codeartifact_domain }}"
         echo "📦 Repository: ${{ inputs.codeartifact_repository }}"
         echo "🔧 Tool: ${{ inputs.codeartifact_tool }}"
+        if [[ -n "${{ inputs.codeartifact_namespace }}" ]]; then
+          echo "🏷️  Namespace: ${{ inputs.codeartifact_namespace }}"
+        fi
         echo "::endgroup::"
 
     - name: Setup AWS CodeArtifact Token Mode
@@ -336,6 +344,9 @@ runs:
         echo "📦 Domain: ${{ inputs.codeartifact_domain }}"
         echo "📦 Repository: ${{ inputs.codeartifact_repository }}"
         echo "🔧 Tool: ${{ inputs.codeartifact_tool }}"
+        if [[ -n "${{ inputs.codeartifact_namespace }}" ]]; then
+          echo "🏷️  Namespace: ${{ inputs.codeartifact_namespace }}"
+        fi
         echo "🔗 Endpoint: $CODEARTIFACT_REPO_URL"
         echo ""
         echo "💡 Environment variables set:"
@@ -414,5 +425,9 @@ runs:
         fi
 
         if [[ -n "${{ inputs.codeartifact_domain }}" ]] && [[ -n "${{ inputs.codeartifact_repository }}" ]] && [[ -n "${{ inputs.codeartifact_tool }}" ]]; then
-          echo "| **CodeArtifact** | ✅ Configured | Domain: ${{ inputs.codeartifact_domain }}, Repo: ${{ inputs.codeartifact_repository }}, Tool: ${{ inputs.codeartifact_tool }} |" >> $GITHUB_STEP_SUMMARY
+          NAMESPACE_INFO=""
+          if [[ -n "${{ inputs.codeartifact_namespace }}" ]]; then
+            NAMESPACE_INFO=", Namespace: ${{ inputs.codeartifact_namespace }}"
+          fi
+          echo "| **CodeArtifact** | ✅ Configured | Domain: ${{ inputs.codeartifact_domain }}, Repo: ${{ inputs.codeartifact_repository }}, Tool: ${{ inputs.codeartifact_tool }}$NAMESPACE_INFO |" >> $GITHUB_STEP_SUMMARY
         fi
